@@ -1,42 +1,53 @@
 package main
 
 import (
-	"fmt"
+	"github.com/devplayg/encdec"
+	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
-
-	"github.com/devplayg/encdec"
 )
 
 func main() {
-	t := time.Now()
+
+	// Check arguments
 	args := os.Args[1:]
 	wg := new(sync.WaitGroup)
+	if len(args) < 1 {
+		log.Println("Encrypt files")
+		return
+	}
 
+	// Get password hash
+	encdec.SetSecretKey(2)
+
+	// Encrypt
+	t := time.Now()
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	for _, target := range args {
 		files, err := filepath.Glob(target)
 		if err != nil {
-			fmt.Errorf(err.Error())
+			log.Println(err.Error())
 		}
 
+		log.Println("Encrypting..")
 		for _, f := range files {
-			basename, _ := filepath.Abs(f)
-
+			absPath, _ := filepath.Abs(f)
 			wg.Add(1)
-			go func(basename string) {
-				_, dur, err := encdec.Encrypt(basename)
+			go func(f string) {
+				newFile, dur, err := encdec.Encrypt(f)
 				if err != nil {
-					fmt.Println(err.Error())
+					os.Remove(newFile.Name())
+					log.Println("[error]", err.Error())
 				} else {
-					fmt.Printf("Encrypted %s (%3.1fs)\n", filepath.Base(basename), time.Duration(dur).Seconds())
+					log.Printf("[%-3.1fs] %s => %s\n", time.Duration(dur).Seconds(), filepath.Base(f), filepath.Base(newFile.Name()))
 				}
 				wg.Done()
-
-			}(basename)
+			}(absPath)
 		}
 	}
 	wg.Wait()
-	fmt.Printf("Complete %3.1fs\n", time.Since(t).Seconds())
+	log.Printf("Complete %3.1fs\n", time.Since(t).Seconds())
 }

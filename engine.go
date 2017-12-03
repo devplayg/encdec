@@ -1,116 +1,174 @@
 package encdec
 
 import (
+	"bytes"
+	"crypto/md5"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"github.com/devplayg/golibs/crypto"
+	"github.com/howeyc/gopass"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
-	//	"strings"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
-
-	"github.com/devplayg/golibs/crypto"
 )
 
-var PrivateKey = []byte("_AES256_ENC_KEY_")
+var PrivateKey []byte
+var Version = []byte{1}
 
-func Encrypt(basename string) (*os.File, time.Duration, error) {
+func SetSecretKey(count int) {
+	fmt.Printf("Password: ")
+	password1, err := gopass.GetPasswd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	h1 := md5.New()
+	h1.Write(password1)
 
+	if count > 1 {
+		fmt.Printf("Password confirm: ")
+		password2, err := gopass.GetPasswd()
+		if err != nil {
+			log.Fatal(err)
+		}
+		h2 := md5.New()
+		h2.Write(password2)
+		if !bytes.Equal(h1.Sum(nil), h2.Sum(nil)) {
+			log.Fatal("Incorrect password")
+		}
+	}
+	PrivateKey = h1.Sum(nil)
+}
+
+func Encrypt(fp string) (*os.File, time.Duration, error) {
 	t := time.Now()
 
 	// Create temp file
-	tempFile, err := ioutil.TempFile(filepath.Dir(basename), filepath.Base(basename)+".")
+	tempFile, err := ioutil.TempFile(filepath.Dir(fp), "enc_")
 	if err != nil {
-		return nil, 0, err
+		return tempFile, time.Since(t), err
 	}
 	defer tempFile.Close()
 
-	// Read file
-	b, err := ioutil.ReadFile(basename)
+	// Write version
+	tempFile.Write(Version)
+
+	// Encrypt filename
+	encFileName, err := crypto.EncAes256(PrivateKey, []byte(filepath.Base(fp)))
 	if err != nil {
-		return nil, 0, err
+		return tempFile, time.Since(t), err
+	}
+
+	// Encrypt file name
+	nameLen := make([]byte, 2)
+	binary.BigEndian.PutUint16(nameLen, uint16(len(encFileName)*2)) // version
+	_, err = tempFile.Write(nameLen)
+	if err != nil {
+		return tempFile, time.Since(t), err
+	}
+	_, err = tempFile.Write(encFileName)
+	if err != nil {
+		return tempFile, time.Since(t), err
 	}
 
 	// Encrypt data
-	enc, err := crypto.EncAes256(PrivateKey, b)
+	b, err := ioutil.ReadFile(fp)
 	if err != nil {
-		return nil, 0, err
+		return tempFile, time.Since(t), err
+	}
+	encData, err := crypto.EncAes256(PrivateKey, b)
+	if err != nil {
+		return tempFile, time.Since(t), err
+	}
+	_, err = tempFile.Write(encData)
+	if err != nil {
+		return tempFile, time.Since(t), err
 	}
 
-	// Write to file
-	_, err = tempFile.Write(enc)
-	if err != nil {
-		return nil, 0, err
-	}
 	return tempFile, time.Since(t), nil
 }
 
-func Decrypt(basename string) (*os.File, time.Duration, error) {
+func Decrypt(fp string) (*os.File, string, time.Duration, error) {
 	t := time.Now()
 
 	// Create temp file
-	tempFile, err := ioutil.TempFile(filepath.Dir(basename), "")
+	tempFile, err := ioutil.TempFile(filepath.Dir(fp), "dec_")
 	if err != nil {
-		return nil, 0, err
+		return nil, "", 0, err
 	}
 	defer tempFile.Close()
 
-	// Read file
-	b, err := ioutil.ReadFile(basename)
+	// Read decrypted file
+	b, err := ioutil.ReadFile(fp)
 	if err != nil {
-		return nil, 0, err
+		return nil, "", 0, err
 	}
 
-	// Encrypt data
-	dec, _ := crypto.DecAes256(PrivateKey, b)
+	// Decrypt file name
+	nameLen := binary.BigEndian.Uint16(b[1:3]) / 2
+	encFileName := b[3 : nameLen+3]
+	originFileName, err := crypto.DecAes256(PrivateKey, encFileName)
 	if err != nil {
-		return nil, 0, err
+		return tempFile, "", time.Since(t), err
 	}
 
-	// Write to file
-	_, err = tempFile.Write(dec)
+	// Decrypt data
+	decData, err := crypto.DecAes256(PrivateKey, b[nameLen+3:])
 	if err != nil {
-		return nil, 0, err
+		return tempFile, "", time.Since(t), err
 	}
 
-	return tempFile, time.Since(t), nil
+	_, err = tempFile.Write(decData)
+	if err != nil {
+		return tempFile, "", time.Since(t), err
+	}
+	//
 
-	//	t := time.Now()
+	return tempFile, string(originFileName), time.Since(t), nil
+}
 
-	//	stripedBasename := strings.TrimSuffix(basename, filepath.Ext(basename))
-	//	newFile := basename + filepath.Ext(stripedBasename)
-	//		 ioutil.WriteFile("/tmp/dat1", d1, 0644)
+func Rename(decFile *os.File, originFileName string, nameTable map[string]bool) (string, error) {
+	suffix := 0
+	var newName string
 
-	// Read file
+	for suffix < 10 {
+		if suffix > 0 {
+			newName = strings.TrimSuffix(string(originFileName), filepath.Ext(string(originFileName)))
+			newName = newName + "_" + strconv.Itoa(suffix) + filepath.Ext(string(originFileName))
+		} else {
+			newName = originFileName
+		}
+		newFilePath := filepath.Join(filepath.Dir(decFile.Name()), newName)
+		if _, err := os.Stat(newFilePath); os.IsNotExist(err) {
+			rwMutex := new(sync.RWMutex)
+			rwMutex.Lock()
+			_, ok := nameTable[newFilePath]
 
-	// Write file
+			if ok {
+				rwMutex.Unlock()
+				continue
+			} else {
+				nameTable[newFilePath] = true
+			}
+			rwMutex.Unlock()
+			err2 := os.Rename(decFile.Name(), newFilePath)
+			rwMutex.Lock()
+			delete(nameTable, newFilePath)
+			rwMutex.Unlock()
+			if err2 == nil {
+				return filepath.Base(newFilePath), nil
+			}
 
-	//	fmt.Println(filepath.Ext(stripedBasename))
-	//	fmt.Println(stripedFp)
-	// zxcvasdfasdf.text.213412341234
+		}
 
-	// Create temp file
-	//	tempFile, err := ioutil.TempFile(basename + filepath.Ext(stripedBasename))
-	//	ioutil.
-	//	if err != nil {
-	//		return nil, 0, err
-	//	}
-	//	defer tempFile.Close()
+		suffix += 1
+	}
 
-	//	// Read file
-	//	b, err := ioutil.ReadFile(fp)
-	//	if err != nil {
-	//		return nil, 0, err
-	//	}
+	return filepath.Base(decFile.Name()), errors.New("Failed to rename file")
 
-	//	// Encrypt data
-	//	enc, _ := crypto.EncAes256(PrivateKey, b)
-	//	if err != nil {
-	//		return nil, 0, err
-	//	}
-
-	//	// Write to file
-	//	_, err = tempFile.Write(enc)
-	//	if err != nil {
-	//		return nil, 0, err
-	//	}
-	//	return nil, 0, nil
 }
