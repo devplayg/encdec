@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"github.com/dustin/go-humanize"
 )
 
 func main() {
@@ -37,12 +38,13 @@ func main() {
 			absPath, _ := filepath.Abs(f)
 			wg.Add(1)
 			go func(f string) {
-				newFile, dur, err := encdec.Encrypt(f)
+				newFile, err := encdec.Encrypt(f)
 				if err != nil {
 					os.Remove(newFile.Name())
 					log.Println("[error]", err.Error())
 				} else {
-					log.Printf("[%-3.1fs] %s => %s\n", time.Duration(dur).Seconds(), filepath.Base(f), filepath.Base(newFile.Name()))
+					fi, _ := os.Stat(newFile.Name())
+					log.Printf("[%s] %s => %s\n", humanize.Comma(fi.Size()), filepath.Base(f), filepath.Base(newFile.Name()))
 				}
 				wg.Done()
 			}(absPath)

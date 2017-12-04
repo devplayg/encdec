@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"github.com/dustin/go-humanize"
 )
 
 func main() {
@@ -25,8 +26,10 @@ func main() {
 
 	// Decrypt
 	t := time.Now()
-	nameTable := make(map[string]bool, 0)
 	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	nameMap := encdec.NewNameMap()
+
 	log.Println("Decrypting..")
 	for _, target := range args {
 		files, err := filepath.Glob(target)
@@ -37,16 +40,17 @@ func main() {
 			absPath, _ := filepath.Abs(f)
 			wg.Add(1)
 			go func(f string) {
-				decFile, originFileName, dur, err := encdec.Decrypt(f)
+				decFile, originFileName, err := encdec.Decrypt(f)
 				if err != nil {
 					os.Remove(decFile.Name())
-					log.Printf("[error][%3.1fs] %s: %s", time.Duration(dur).Seconds(), err.Error(), filepath.Base(f))
+					log.Printf("[error] %s: %s", err.Error(), filepath.Base(f))
 				} else {
-					newName, err2 := encdec.Rename(decFile, originFileName, nameTable)
+					newName, err2 := encdec.Rename(decFile, originFileName, nameMap)
 					if err2 != nil {
-						log.Printf("[error][%3.1fs] %s: %s => %s", time.Duration(dur).Seconds(), err2.Error(), filepath.Base(f), newName)
+						log.Printf("[error] %s: %s => %s", err2.Error(), filepath.Base(f), newName)
 					} else {
-						log.Printf("[%3.1fs] %s => %s \n", time.Duration(dur).Seconds(), filepath.Base(f), newName)
+						fi, _ := os.Stat(newName)
+						log.Printf("[%s] %s => %s \n", humanize.Comma(fi.Size()), filepath.Base(f), newName)
 					}
 				}
 				wg.Done()

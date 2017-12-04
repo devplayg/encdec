@@ -1,8 +1,7 @@
 package encdec
 
 import (
-	"bytes"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -15,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 var PrivateKey []byte
@@ -27,8 +25,10 @@ func SetSecretKey(count int) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	h1 := md5.New()
-	h1.Write(password1)
+	if len(password1) < 1 {
+		log.Fatal("Password is too short")
+	}
+	h1 := sha256.Sum256([]byte(password1))
 
 	if count > 1 {
 		fmt.Printf("Password confirm: ")
@@ -36,22 +36,19 @@ func SetSecretKey(count int) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		h2 := md5.New()
-		h2.Write(password2)
-		if !bytes.Equal(h1.Sum(nil), h2.Sum(nil)) {
+		h2 := sha256.Sum256([]byte(password2))
+		if h1 != h2 {
 			log.Fatal("Incorrect password")
 		}
 	}
-	PrivateKey = h1.Sum(nil)
+	PrivateKey = h1[:]
 }
 
-func Encrypt(fp string) (*os.File, time.Duration, error) {
-	t := time.Now()
-
+func Encrypt(fp string) (*os.File, error) {
 	// Create temp file
 	tempFile, err := ioutil.TempFile(filepath.Dir(fp), "enc_")
 	if err != nil {
-		return tempFile, time.Since(t), err
+		return tempFile, err
 	}
 	defer tempFile.Close()
 
@@ -61,7 +58,7 @@ func Encrypt(fp string) (*os.File, time.Duration, error) {
 	// Encrypt filename
 	encFileName, err := crypto.EncAes256(PrivateKey, []byte(filepath.Base(fp)))
 	if err != nil {
-		return tempFile, time.Since(t), err
+		return tempFile, err
 	}
 
 	// Encrypt file name
@@ -69,44 +66,42 @@ func Encrypt(fp string) (*os.File, time.Duration, error) {
 	binary.BigEndian.PutUint16(nameLen, uint16(len(encFileName)*2)) // version
 	_, err = tempFile.Write(nameLen)
 	if err != nil {
-		return tempFile, time.Since(t), err
+		return tempFile, err
 	}
 	_, err = tempFile.Write(encFileName)
 	if err != nil {
-		return tempFile, time.Since(t), err
+		return tempFile, err
 	}
 
 	// Encrypt data
 	b, err := ioutil.ReadFile(fp)
 	if err != nil {
-		return tempFile, time.Since(t), err
+		return tempFile, err
 	}
 	encData, err := crypto.EncAes256(PrivateKey, b)
 	if err != nil {
-		return tempFile, time.Since(t), err
+		return tempFile, err
 	}
 	_, err = tempFile.Write(encData)
 	if err != nil {
-		return tempFile, time.Since(t), err
+		return tempFile, err
 	}
 
-	return tempFile, time.Since(t), nil
+	return tempFile, nil
 }
 
-func Decrypt(fp string) (*os.File, string, time.Duration, error) {
-	t := time.Now()
-
+func Decrypt(fp string) (*os.File, string, error) {
 	// Create temp file
 	tempFile, err := ioutil.TempFile(filepath.Dir(fp), "dec_")
 	if err != nil {
-		return nil, "", 0, err
+		return nil, "", err
 	}
 	defer tempFile.Close()
 
 	// Read decrypted file
 	b, err := ioutil.ReadFile(fp)
 	if err != nil {
-		return nil, "", 0, err
+		return nil, "", err
 	}
 
 	// Decrypt file name
@@ -114,25 +109,25 @@ func Decrypt(fp string) (*os.File, string, time.Duration, error) {
 	encFileName := b[3 : nameLen+3]
 	originFileName, err := crypto.DecAes256(PrivateKey, encFileName)
 	if err != nil {
-		return tempFile, "", time.Since(t), err
+		return tempFile, "", err
 	}
 
 	// Decrypt data
 	decData, err := crypto.DecAes256(PrivateKey, b[nameLen+3:])
 	if err != nil {
-		return tempFile, "", time.Since(t), err
+		return tempFile, "", err
 	}
 
 	_, err = tempFile.Write(decData)
 	if err != nil {
-		return tempFile, "", time.Since(t), err
+		return tempFile, "", err
 	}
 	//
 
-	return tempFile, string(originFileName), time.Since(t), nil
+	return tempFile, string(originFileName), nil
 }
 
-func Rename(decFile *os.File, originFileName string, nameTable map[string]bool) (string, error) {
+func Rename(decFile *os.File, originFileName string, nameMap *NameMap) (string, error) {
 	suffix := 0
 	var newName string
 
@@ -145,21 +140,15 @@ func Rename(decFile *os.File, originFileName string, nameTable map[string]bool) 
 		}
 		newFilePath := filepath.Join(filepath.Dir(decFile.Name()), newName)
 		if _, err := os.Stat(newFilePath); os.IsNotExist(err) {
-			rwMutex := new(sync.RWMutex)
-			rwMutex.Lock()
-			_, ok := nameTable[newFilePath]
 
+			_, ok := nameMap.Load(newFilePath)
 			if ok {
-				rwMutex.Unlock()
 				continue
 			} else {
-				nameTable[newFilePath] = true
+				nameMap.Store(newFilePath, true)
 			}
-			rwMutex.Unlock()
 			err2 := os.Rename(decFile.Name(), newFilePath)
-			rwMutex.Lock()
-			delete(nameTable, newFilePath)
-			rwMutex.Unlock()
+			nameMap.Delete(newFilePath)
 			if err2 == nil {
 				return filepath.Base(newFilePath), nil
 			}
@@ -170,5 +159,35 @@ func Rename(decFile *os.File, originFileName string, nameTable map[string]bool) 
 	}
 
 	return filepath.Base(decFile.Name()), errors.New("Failed to rename file")
+}
 
+
+type NameMap struct {
+	sync.RWMutex
+	internal map[string]bool
+}
+
+func NewNameMap() *NameMap {
+	return &NameMap{
+		internal: make(map[string]bool),
+	}
+}
+
+func (rm *NameMap) Load(key string) (value bool, ok bool) {
+	rm.RLock()
+	result, ok := rm.internal[key]
+	rm.RUnlock()
+	return result, ok
+}
+
+func (rm *NameMap) Delete(key string) {
+	rm.Lock()
+	delete(rm.internal, key)
+	rm.Unlock()
+}
+
+func (rm *NameMap) Store(key string, value bool) {
+	rm.Lock()
+	rm.internal[key] = value
+	rm.Unlock()
 }
