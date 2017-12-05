@@ -1,14 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"github.com/devplayg/encdec"
-	"log"
+	"github.com/dustin/go-humanize"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
-	"github.com/dustin/go-humanize"
 )
 
 func main() {
@@ -17,12 +17,16 @@ func main() {
 	args := os.Args[1:]
 	wg := new(sync.WaitGroup)
 	if len(args) < 1 {
-		log.Println("Encrypt files")
+		fmt.Println("Encrypt files")
 		return
 	}
 
 	// Get password hash
-	encdec.SetSecretKey(2)
+	err := encdec.SetSecretKey(2)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
 
 	// Encrypt
 	t := time.Now()
@@ -30,10 +34,10 @@ func main() {
 	for _, target := range args {
 		files, err := filepath.Glob(target)
 		if err != nil {
-			log.Println(err.Error())
+			fmt.Println(err.Error())
 		}
 
-		log.Println("Encrypting..")
+		fmt.Println("Encrypting..")
 		for _, f := range files {
 			absPath, _ := filepath.Abs(f)
 			wg.Add(1)
@@ -41,15 +45,16 @@ func main() {
 				newFile, err := encdec.Encrypt(f)
 				if err != nil {
 					os.Remove(newFile.Name())
-					log.Println("[error]", err.Error())
+					fmt.Println(err.Error())
 				} else {
-					fi, _ := os.Stat(newFile.Name())
-					log.Printf("[%s] %s => %s\n", humanize.Comma(fi.Size()), filepath.Base(f), filepath.Base(newFile.Name()))
+					srcFile, _ := os.Stat(absPath)
+					dstFile, _ := os.Stat(newFile.Name())
+					fmt.Printf("%s (%s Bytes) => %s (%s Bytes)\n", filepath.Base(f), humanize.Comma(srcFile.Size()), filepath.Base(newFile.Name()), humanize.Comma(dstFile.Size()))
 				}
 				wg.Done()
 			}(absPath)
 		}
 	}
 	wg.Wait()
-	log.Printf("Complete %3.1fs\n", time.Since(t).Seconds())
+	fmt.Printf("Complete %3.1fs\n", time.Since(t).Seconds())
 }

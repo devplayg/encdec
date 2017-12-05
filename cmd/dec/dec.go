@@ -43,14 +43,15 @@ func main() {
 				decFile, originFileName, err := encdec.Decrypt(f)
 				if err != nil {
 					os.Remove(decFile.Name())
-					log.Printf("[error] %s: %s", err.Error(), filepath.Base(f))
+					log.Printf("%s: %s", err.Error(), filepath.Base(f))
 				} else {
 					newName, err2 := encdec.Rename(decFile, originFileName, nameMap)
 					if err2 != nil {
-						log.Printf("[error] %s: %s => %s", err2.Error(), filepath.Base(f), newName)
+						log.Printf("%s: %s => %s", err2.Error(), filepath.Base(f), newName)
 					} else {
-						fi, _ := os.Stat(newName)
-						log.Printf("[%s] %s => %s \n", humanize.Comma(fi.Size()), filepath.Base(f), newName)
+						srcFile, _ := os.Stat(absPath)
+						dstFile, _ := os.Stat(newName)
+						log.Printf("%s (%s Bytes) => %s (%s Bytes)\n", filepath.Base(f), humanize.Comma(srcFile.Size()), newName, humanize.Comma(dstFile.Size()))
 					}
 				}
 				wg.Done()

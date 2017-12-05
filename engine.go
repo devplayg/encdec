@@ -8,7 +8,6 @@ import (
 	"github.com/devplayg/golibs/crypto"
 	"github.com/howeyc/gopass"
 	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,14 +18,14 @@ import (
 var PrivateKey []byte
 var Version = []byte{1}
 
-func SetSecretKey(count int) {
+func SetSecretKey(count int) error {
 	fmt.Printf("Password: ")
 	password1, err := gopass.GetPasswd()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if len(password1) < 1 {
-		log.Fatal("Password is too short")
+		return errors.New("password is too short")
 	}
 	h1 := sha256.Sum256([]byte(password1))
 
@@ -34,14 +33,16 @@ func SetSecretKey(count int) {
 		fmt.Printf("Password confirm: ")
 		password2, err := gopass.GetPasswd()
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		h2 := sha256.Sum256([]byte(password2))
 		if h1 != h2 {
-			log.Fatal("Incorrect password")
+			return errors.New("incorrect password")
 		}
 	}
 	PrivateKey = h1[:]
+
+	return nil
 }
 
 func Encrypt(fp string) (*os.File, error) {
@@ -109,20 +110,19 @@ func Decrypt(fp string) (*os.File, string, error) {
 	encFileName := b[3 : nameLen+3]
 	originFileName, err := crypto.DecAes256(PrivateKey, encFileName)
 	if err != nil {
-		return tempFile, "", err
+		return tempFile, "", errors.New("failed to decrypt")
 	}
 
 	// Decrypt data
 	decData, err := crypto.DecAes256(PrivateKey, b[nameLen+3:])
 	if err != nil {
-		return tempFile, "", err
+		return tempFile, "", errors.New("failed to decrypt(-2)")
 	}
 
 	_, err = tempFile.Write(decData)
 	if err != nil {
-		return tempFile, "", err
+		return tempFile, "", errors.New("failed to decrypt(-3)")
 	}
-	//
 
 	return tempFile, string(originFileName), nil
 }
@@ -160,7 +160,6 @@ func Rename(decFile *os.File, originFileName string, nameMap *NameMap) (string, 
 
 	return filepath.Base(decFile.Name()), errors.New("Failed to rename file")
 }
-
 
 type NameMap struct {
 	sync.RWMutex
