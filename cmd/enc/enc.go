@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"sync/atomic"
 )
 
 func main() {
@@ -31,6 +32,7 @@ func main() {
 	// Encrypt
 	t := time.Now()
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	var count uint64 = 0
 	for _, target := range args {
 		files, err := filepath.Glob(target)
 		if err != nil {
@@ -47,14 +49,15 @@ func main() {
 					os.Remove(newFile.Name())
 					fmt.Println(err.Error())
 				} else {
-					srcFile, _ := os.Stat(absPath)
+					srcFile, _ := os.Stat(f)
 					dstFile, _ := os.Stat(newFile.Name())
-					fmt.Printf("%s (%s Bytes) => %s (%s Bytes)\n", filepath.Base(f), humanize.Comma(srcFile.Size()), filepath.Base(newFile.Name()), humanize.Comma(dstFile.Size()))
+					fmt.Printf("%s (%s Bytes) => %s (+%s Bytes)\n", filepath.Base(f), humanize.Comma(srcFile.Size()), filepath.Base(newFile.Name()), humanize.Comma(dstFile.Size() - srcFile.Size()))
 				}
+				atomic.AddUint64(&count, 1)
 				wg.Done()
 			}(absPath)
 		}
 	}
 	wg.Wait()
-	fmt.Printf("Complete %3.1fs\n", time.Since(t).Seconds())
+	fmt.Printf("Count: %d, Duration %3.1fs\n", count, time.Since(t).Seconds())
 }

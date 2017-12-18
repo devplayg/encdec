@@ -47,22 +47,20 @@ func SetSecretKey(count int) error {
 
 func Encrypt(fp string) (*os.File, error) {
 	// Create temp file
-	tempFile, err := ioutil.TempFile(filepath.Dir(fp), "enc_")
+	tempFile, err := ioutil.TempFile(filepath.Dir(fp), filepath.Base(fp) + "_")
 	if err != nil {
 		return tempFile, err
 	}
 	defer tempFile.Close()
 
-	// Write version
+	// Write version (1 Byte)
 	tempFile.Write(Version)
 
-	// Encrypt filename
+	// Write filename encrypted
 	encFileName, err := crypto.EncAes256(PrivateKey, []byte(filepath.Base(fp)))
 	if err != nil {
 		return tempFile, err
 	}
-
-	// Encrypt file name
 	nameLen := make([]byte, 2)
 	binary.BigEndian.PutUint16(nameLen, uint16(len(encFileName)*2)) // version
 	_, err = tempFile.Write(nameLen)
@@ -74,7 +72,7 @@ func Encrypt(fp string) (*os.File, error) {
 		return tempFile, err
 	}
 
-	// Encrypt data
+	// Write data encrypted
 	b, err := ioutil.ReadFile(fp)
 	if err != nil {
 		return tempFile, err
@@ -152,13 +150,12 @@ func Rename(decFile *os.File, originFileName string, nameMap *NameMap) (string, 
 			if err2 == nil {
 				return filepath.Base(newFilePath), nil
 			}
-
 		}
 
 		suffix += 1
 	}
 
-	return filepath.Base(decFile.Name()), errors.New("Failed to rename file")
+	return filepath.Base(decFile.Name()), errors.New("failed to rename file")
 }
 
 type NameMap struct {

@@ -2,13 +2,15 @@ package main
 
 import (
 	"github.com/devplayg/encdec"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
 	"github.com/dustin/go-humanize"
+	"sync/atomic"
+	"fmt"
+	"log"
 )
 
 func main() {
@@ -26,8 +28,8 @@ func main() {
 
 	// Decrypt
 	t := time.Now()
+	var count uint64 = 0
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
 	nameMap := encdec.NewNameMap()
 
 	log.Println("Decrypting..")
@@ -43,22 +45,22 @@ func main() {
 				decFile, originFileName, err := encdec.Decrypt(f)
 				if err != nil {
 					os.Remove(decFile.Name())
-					log.Printf("%s: %s", err.Error(), filepath.Base(f))
+					fmt.Printf("%s: %s", err.Error(), filepath.Base(f))
 				} else {
 					newName, err2 := encdec.Rename(decFile, originFileName, nameMap)
 					if err2 != nil {
-						log.Printf("%s: %s => %s", err2.Error(), filepath.Base(f), newName)
+						fmt.Printf("%s: %s => %s", err2.Error(), filepath.Base(f), newName)
 					} else {
-						srcFile, _ := os.Stat(absPath)
+						srcFile, _ := os.Stat(f)
 						dstFile, _ := os.Stat(newName)
-						log.Printf("%s (%s Bytes) => %s (%s Bytes)\n", filepath.Base(f), humanize.Comma(srcFile.Size()), newName, humanize.Comma(dstFile.Size()))
+						fmt.Printf("%s (%s Bytes) => %s (%s Bytes)\n", filepath.Base(f), humanize.Comma(srcFile.Size()), newName, humanize.Comma(dstFile.Size()))
 					}
 				}
+				atomic.AddUint64(&count, 1)
 				wg.Done()
-
 			}(absPath)
 		}
 	}
 	wg.Wait()
-	log.Printf("Complete %3.1fs\n", time.Since(t).Seconds())
+	fmt.Printf("Count: %d, Duration %3.1fs\n", count, time.Since(t).Seconds())
 }
