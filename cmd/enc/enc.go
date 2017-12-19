@@ -2,21 +2,21 @@ package main
 
 import (
 	"fmt"
-	"github.com/devplayg/encdec"
-	"github.com/dustin/go-humanize"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
-	"time"
 	"sync/atomic"
+	"time"
+
+	"github.com/devplayg/encdec"
+	"github.com/dustin/go-humanize"
 )
 
 func main() {
 
 	// Check arguments
 	args := os.Args[1:]
-	wg := new(sync.WaitGroup)
 	if len(args) < 1 {
 		fmt.Println("Encrypt files")
 		return
@@ -32,6 +32,7 @@ func main() {
 	// Encrypt
 	t := time.Now()
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	wg := new(sync.WaitGroup)
 	var count uint64 = 0
 	for _, target := range args {
 		files, err := filepath.Glob(target)
@@ -51,7 +52,7 @@ func main() {
 				} else {
 					srcFile, _ := os.Stat(f)
 					dstFile, _ := os.Stat(newFile.Name())
-					fmt.Printf("%s (%s Bytes) => %s (+%s Bytes)\n", filepath.Base(f), humanize.Comma(srcFile.Size()), filepath.Base(newFile.Name()), humanize.Comma(dstFile.Size() - srcFile.Size()))
+					fmt.Printf("%s (%s Bytes) => %s (+%s Bytes)\n", filepath.Base(f), humanize.Comma(srcFile.Size()), filepath.Base(newFile.Name()), humanize.Comma(dstFile.Size()-srcFile.Size()))
 				}
 				atomic.AddUint64(&count, 1)
 				wg.Done()

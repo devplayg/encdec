@@ -1,25 +1,24 @@
 package main
 
 import (
-	"github.com/devplayg/encdec"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
-	"time"
-	"github.com/dustin/go-humanize"
 	"sync/atomic"
-	"fmt"
-	"log"
+	"time"
+
+	"github.com/devplayg/encdec"
+	"github.com/dustin/go-humanize"
 )
 
 func main() {
 
 	// Check arguments
 	args := os.Args[1:]
-	wg := new(sync.WaitGroup)
 	if len(args) < 1 {
-		log.Println("Decrypt files")
+		fmt.Println("Decrypt files")
 		return
 	}
 
@@ -28,15 +27,15 @@ func main() {
 
 	// Decrypt
 	t := time.Now()
+	wg := new(sync.WaitGroup)
 	var count uint64 = 0
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	nameMap := encdec.NewNameMap()
-
-	log.Println("Decrypting..")
+	fmt.Println("Decrypting..")
 	for _, target := range args {
 		files, err := filepath.Glob(target)
 		if err != nil {
-			log.Println(err.Error())
+			fmt.Println(err.Error())
 		}
 		for _, f := range files {
 			absPath, _ := filepath.Abs(f)
